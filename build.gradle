@@ -1,0 +1,110 @@
+plugins {
+  id 'java'
+  id 'jacoco'
+  id 'application'
+  id 'checkstyle'
+  id 'com.github.sherter.google-java-format' version '0.8'
+  id 'com.github.spotbugs' version '1.6.9'
+}
+
+allprojects {
+  apply plugin: 'java'
+  apply plugin: 'jacoco'
+
+  group = 'com.google.spez'
+  version = '1.0.0-SNAPSHOT'
+  archivesBaseName = 'Spez'
+
+  sourceCompatibility = 1.8
+  targetCompatibility = 1.8
+
+
+  repositories {
+    jcenter()
+    maven { // The google mirror is less flaky than mavenCentral()
+        url "https://maven-central.storage-download.googleapis.com/repos/central/data/"
+    }
+  }
+
+  googleJavaFormat {
+    exclude '.gradle'
+  }
+
+  spotbugs {
+    effort = "max"
+    reportLevel = "low"
+    includeFilter = file("config/findbugs-exclude.xml")
+  }
+
+  dependencies {
+    //AutoValue
+    compile             "com.google.auto.value:auto-value-annotations:1.6.3"
+    annotationProcessor "com.google.auto.value:auto-value:1.6.3"
+
+    // Logging and Config
+    implementation group: 'com.typesafe', name: 'config', version: type_safe_config_version
+    implementation group: 'org.slf4j', name: 'jul-to-slf4j', version: slf4j_version
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: logback_version
+    implementation group: 'ch.qos.logback', name: 'logback-core', version: logback_version
+    implementation group: 'org.codehaus.groovy', name: 'groovy-all', version: groovy_version
+
+    // Impl
+    implementation group: 'com.google.guava', name: 'guava', version: '27.0.1-jre'
+    implementation group: 'com.google.cloud', name: 'google-cloud-spanner', version: '1.9.0'
+    implementation group: 'com.google.cloud', name: 'google-cloud-pubsub', version: '1.63.0'
+    implementation group: 'org.apache.avro', name: 'avro', version: '1.8.2'
+    implementation group: 'io.netty', name: 'netty-buffer', version: '4.1.33.Final'
+
+    // Tracing
+    compile group: 'io.opencensus', name: 'opencensus-api', version: '0.19.2'
+    compile group: 'io.opencensus', name: 'opencensus-impl', version: '0.19.2'
+    compile group: 'io.opencensus', name: 'opencensus-contrib-grpc-metrics', version: '0.19.2'
+    compile group: 'io.opencensus', name: 'opencensus-exporter-trace-stackdriver', version: '0.19.2'
+    compile group: 'io.opencensus', name: 'opencensus-exporter-stats-stackdriver', version: '0.19.2'
+    compile group: 'io.opencensus', name: 'opencensus-contrib-zpages', version: '0.19.2'
+    compile group: 'com.google.cloud', name: 'google-cloud-monitoring', version: '1.65.0'
+    compile group: 'com.google.cloud', name: 'google-cloud-trace', version: '0.83.0-beta'
+
+    // Testing
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: junit_version
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params', version: junit_version
+    testRuntime group:'org.junit.jupiter', name: 'junit-jupiter-engine', version: junit_version
+
+    // Mockito
+    testImplementation group: 'org.mockito', name: 'mockito-core', version: mockito_version
+    testImplementation group: 'org.hamcrest', name: 'hamcrest-all', version: hamcrest_version
+
+    // JUnit4 compat
+    testImplementation group: 'junit', name: 'junit', version: "4.12"
+    testRuntime group:'org.junit.vintage', name: 'junit-vintage-engine', version: junit_version
+  }
+
+  // enable junit 5
+  test {
+    useJUnitPlatform()
+  }
+
+  jacocoTestReport {
+    reports {
+      xml.enabled false
+      csv.enabled false
+      html.destination file("${buildDir}/reports/jacocoHtml")
+    }
+  }
+}
+
+sourceSets.main.java.srcDirs = ['src']
+mainClassName = 'com.google.spez.Spez'
+
+run {
+    main = 'com.google.spez.Spez'
+}
+
+jar {
+  manifest {
+    attributes 'Main-Class': 'com.google.spez.Spez'
+    }
+       from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

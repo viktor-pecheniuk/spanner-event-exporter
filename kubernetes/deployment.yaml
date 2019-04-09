@@ -1,0 +1,57 @@
+# Copyright (C) 2019 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: spez-poller
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: spez-poller
+        version: v1
+    spec:
+      initContainers:
+        - name: spez-bootstrap
+          image: gcr.io/cloud-builders/gcloud-slim
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: spez-config
+          volumeMounts:
+            - name: "service-account"
+              mountPath: "/var/run/secret/cloud.google.com"
+            - name: "certs"
+              mountPath: "/etc/ssl/certs"
+          command:
+            - "gcloud pubsub topics create $(TABLE_NAME)"
+            - "gcloud pubsub subscriptions create $(TABLE_NAME) --topic $(TABLE_NAME)"
+            - "gsutil mb -l $(BUCKET_REGION) $(BUCKET_NAME)"
+            - "gcloud functions deploy $(FUNCTION) --source https://source.developers.google.com/<PROJECT_SOURCE> --runtime go111 --trigger-topic $(TABLE_NAME)"
+      containers:
+      - name: spez-poller
+        image: gcr.io/cloud-solutions-publishing/spez-poller:latest
+        imagePullPolicy: Always
+        envFrom:
+            - configMapRef:
+                name: spez-config
+        volumeMounts:
+            - name: "service-account"
+              mountPath: "/var/run/secret/cloud.google.com"
+            - name: "certs"
+              mountPath: "/etc/ssl/certs"
+        ports:
+        - containerPort: 9010 #JMX Port
