@@ -90,19 +90,18 @@ metadata:
   name: spez-config
   namespace: default
 data:
-GOOGLE_APPLICATION_CREDENTIALS: "/var/run/secret/cloud.google.com/service-account.json"
-AVRO_NAMESPACE: "spez"
-INSTANCE_NAME: "spez-poller-demo"
-DB_NAME: "spez_poller_db"
-TABLE_NAME: "spez_poller_table"
-POLL_RATE: "1000"
-RECORD_LIMIT: "200"
-STARTING_TIMESTAMP: "2019-03-06T01:29:25.500000Z"
-PUBLISH_TO_PUBSUB: true
-FUNCTION: "archiver"
-BUCKET_REGION: "us-west-1"
-BUCKET_NAME: "gs://spez_archive/spez_poller_table"
-
+  GOOGLE_APPLICATION_CREDENTIALS: "/var/run/secret/cloud.google.com/service-account.json"
+  AVRO_NAMESPACE: "spez"
+  INSTANCE_NAME: "spez-poller-demo"
+  DB_NAME: "spez_poller_db"
+  TABLE_NAME: "spez_poller_table"
+  POLL_RATE: "1000"
+  RECORD_LIMIT: "200"
+  STARTING_TIMESTAMP: "2019-03-06T01:29:25.500000Z"
+  PUBLISH_TO_PUBSUB: true
+  FUNCTION: "archiver"
+  BUCKET_REGION: "us-west-1"
+  BUCKET_NAME: "gs://spez_archive/spez_poller_table"
 ```
 
 ## Create a Spanner Table
