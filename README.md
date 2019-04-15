@@ -113,8 +113,8 @@ null and contains the Spanner CommitTimestamp.
 The poller will perform a full table scan on each poll interval. This will
 consume resources on your db instance. Typically to help with this, you would
 create a secondary index with the timestamp as the primary key. Do not do that
-as it will cause hotspots. In this case, you may want to instead increae the
-polling interval in order to address any excessive resouce consumption on your
+as it will cause hotspots. In this case, you may want to instead increase the
+polling interval in order to address any excessive resource consumption on your
 instance.
 
 Do not use a commit timestamp column as the first part of the primary key of a
