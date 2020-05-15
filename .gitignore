@@ -1,0 +1,15 @@
+out/
+.idea/
+.idea_modules/
+*.iml
+*.ipr
+*.iws
+
+build
+.gradle
+gradle
+
+##############################
+## personal
+##############################
+data

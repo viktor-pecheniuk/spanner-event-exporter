@@ -93,7 +93,6 @@ allprojects {
   }
 }
 
-sourceSets.main.java.srcDirs = ['src']
 mainClassName = 'com.google.spez.Spez'
 
 run {
