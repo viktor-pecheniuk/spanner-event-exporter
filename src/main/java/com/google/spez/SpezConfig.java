@@ -24,6 +24,7 @@ import com.typesafe.config.Config;
 public class SpezConfig {
   public final int pollRate;
   public final String recordLimit;
+  public final String projectId;
   public final String instanceName;
   public final String dbName;
   public final String tableName;
@@ -38,6 +39,7 @@ public class SpezConfig {
    */
   public SpezConfig(Config config) {
     this.avroNamespace = config.getString("spez.avroNamespace");
+    this.projectId = config.getString("spez.projectId");
     this.instanceName = config.getString("spez.instanceName");
     this.dbName = config.getString("spez.dbName");
     this.tableName = config.getString("spez.tableName");

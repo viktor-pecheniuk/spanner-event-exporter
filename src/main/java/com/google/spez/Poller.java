@@ -18,30 +18,16 @@ package com.google.spez;
 
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutures;
-import com.google.cloud.ServiceOptions;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.stub.GrpcSubscriberStub;
 import com.google.cloud.pubsub.v1.stub.SubscriberStub;
 import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings;
-import com.google.cloud.spanner.DatabaseClient;
-import com.google.cloud.spanner.DatabaseId;
-import com.google.cloud.spanner.ResultSet;
-import com.google.cloud.spanner.Spanner;
-import com.google.cloud.spanner.SpannerOptions;
-import com.google.cloud.spanner.Statement;
-import com.google.cloud.spanner.Struct;
-import com.google.cloud.spanner.Type;
+import com.google.cloud.spanner.*;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
-import com.google.pubsub.v1.ProjectSubscriptionName;
-import com.google.pubsub.v1.ProjectTopicName;
-import com.google.pubsub.v1.PubsubMessage;
-import com.google.pubsub.v1.PullRequest;
-import com.google.pubsub.v1.PullResponse;
-import com.google.pubsub.v1.ReceivedMessage;
+import com.google.pubsub.v1.*;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufOutputStream;
 import io.netty.buffer.Unpooled;
 import io.opencensus.common.Scope;
 import io.opencensus.contrib.grpc.metrics.RpcViews;
@@ -50,29 +36,22 @@ import io.opencensus.exporter.stats.stackdriver.StackdriverStatsExporter;
 import io.opencensus.exporter.trace.stackdriver.StackdriverExporter;
 import io.opencensus.trace.Tracing;
 import io.opencensus.trace.samplers.Samplers;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DatumWriter;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.io.JsonDecoder;
-import org.apache.avro.io.JsonEncoder;
+import org.apache.avro.io.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * This class creates and schedules the poller
@@ -92,12 +71,12 @@ import org.slf4j.LoggerFactory;
  */
 class Poller {
   private static final Logger log = LoggerFactory.getLogger(Poller.class);
-  private static final String PROJECT_ID = ServiceOptions.getDefaultProjectId();
   private static final String SAMPLE_SPAN = "SPEZ";
 
   private final int pollRate;
   private final String recordLimit;
   private final String avroNamespace;
+  private final String projectId;
   private final String instanceName;
   private final String dbName;
   private final String tableName;
@@ -114,6 +93,7 @@ class Poller {
   public Poller(SpezConfig config) {
     this.avroNamespace = config.avroNamespace;
     this.instanceName = config.instanceName;
+    this.projectId = config.projectId;
     this.dbName = config.dbName;
     this.tableName = config.tableName;
     this.pollRate = config.pollRate;
@@ -153,7 +133,7 @@ class Poller {
   private DatabaseClient configureDb() {
     final SpannerOptions options = SpannerOptions.newBuilder().build();
     spanner = options.getService();
-    final DatabaseId db = DatabaseId.of(PROJECT_ID, instanceName, dbName);
+    final DatabaseId db = DatabaseId.of(projectId, instanceName, dbName);
     final String clientProject = spanner.getOptions().getProjectId();
 
     if (!db.getInstanceId().getProject().equals(clientProject)) {
@@ -174,7 +154,7 @@ class Poller {
   private Publisher configurePubSub() {
     if (publishToPubSub) {
       ProjectTopicName topicName =
-          ProjectTopicName.of(PROJECT_ID, tableName); // Topic name will always be the Table Name
+          ProjectTopicName.of(projectId, tableName); // Topic name will always be the Table Name
       try {
         Publisher publisher = Publisher.newBuilder(topicName).build();
         return publisher;
@@ -233,7 +213,7 @@ class Poller {
         TimeUnit.MILLISECONDS);
   }
 
-  private void getSchema() {
+  private void buildSchema() {
     ResultSet resultSet;
     try (Scope ss =
         Tracing.getTracer()
@@ -348,7 +328,8 @@ class Poller {
 
     while (resultSet.next()) {
       if (firstRun == false) {
-        getSchema();
+        buildSchema();
+
         if (publishToPubSub) {
           lastTimestamp = getLastProcessedTimestamp();
         } else {
@@ -441,23 +422,20 @@ class Poller {
       log.debug("Made Record");
       log.debug(record.toString());
 
-      try (final ByteBufOutputStream outputStream = new ByteBufOutputStream(bb)) {
+      byte[] retVal;
+      ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
-        final JsonEncoder encoder =
-            EncoderFactory.get().jsonEncoder(avroSchema, outputStream, true);
-        final DatumWriter<Object> writer = new GenericDatumWriter<>(avroSchema);
+      try {
+        JsonEncoder encoder =
+            EncoderFactory.get().jsonEncoder(avroSchema, outputStream);
+        GenericDatumWriter<GenericRecord> writer = new GenericDatumWriter<>(avroSchema);
 
         log.debug("Serializing Record");
         writer.write(record, encoder);
         encoder.flush();
-        outputStream.flush();
-        log.debug("Adding serialized record to list");
-        final byte[] ba = new byte[bb.readableBytes()];
-        log.debug("--------------------------------- readableBytes " + bb.readableBytes());
-        log.debug("--------------------------------- readerIndex " + bb.readerIndex());
-        log.debug("--------------------------------- writerIndex " + bb.writerIndex());
-        bb.getBytes(bb.readerIndex(), ba);
-        final ByteString message = ByteString.copyFrom(ba);
+
+        retVal = outputStream.toByteArray();
+        ByteString message = ByteString.copyFrom(retVal);
 
         if (publishToPubSub) {
           final PubsubMessage pubSubMessage =
@@ -526,7 +504,7 @@ class Poller {
               .build();
 
       try (SubscriberStub subscriber = GrpcSubscriberStub.create(subscriberStubSettings)) {
-        final String subscriptionName = ProjectSubscriptionName.format(PROJECT_ID, tableName);
+        final String subscriptionName = ProjectSubscriptionName.format(projectId, tableName);
         final PullRequest pullRequest =
             PullRequest.newBuilder()
                 .setMaxMessages(1)
