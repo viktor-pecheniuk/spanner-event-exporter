@@ -27,8 +27,6 @@ import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.*;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.opencensus.common.Scope;
 import io.opencensus.contrib.grpc.metrics.RpcViews;
 import io.opencensus.contrib.zpages.ZPageHandlers;
@@ -152,9 +150,10 @@ class Poller {
   }
 
   private Publisher configurePubSub() {
+    String tableRef = tableName.toLowerCase();
     if (publishToPubSub) {
       ProjectTopicName topicName =
-          ProjectTopicName.of(projectId, tableName); // Topic name will always be the Table Name
+          ProjectTopicName.of(projectId, tableRef); // Topic name will always be the Table Name
       try {
         Publisher publisher = Publisher.newBuilder(topicName).build();
         return publisher;
@@ -234,6 +233,7 @@ class Poller {
 
       final String name = currentRow.getString(0);
       final String type = currentRow.getString(1);
+
       spannerSchema.put(name, type);
       log.debug("Binding Avro Schema");
       // TODO(JR): Need to strip out size from the type object and add it to the avro datatype i.e
@@ -242,36 +242,38 @@ class Poller {
       switch (type) {
         case "ARRAY":
           log.debug("Made ARRAY");
-          avroSchemaBuilder.name(name).type().array();
+          avroSchemaBuilder.name(name).type().nullable().array();
           break;
         case "BOOL":
           log.debug("Made BOOL");
-          avroSchemaBuilder.name(name).type().booleanType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().booleanType().noDefault();
           break;
         case "BYTES":
           log.debug("Made BYTES");
-          avroSchemaBuilder.name(name).type().bytesType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().bytesType().noDefault();
           break;
         case "DATE":
           // Date handled as String type
           log.debug("Made DATE");
-          avroSchemaBuilder.name(name).type().stringType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().stringType().noDefault();
           break;
         case "FLOAT64":
           log.debug("Made FLOAT64");
-          avroSchemaBuilder.name(name).type().doubleType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().doubleType().noDefault();
           break;
         case "INT64":
           log.debug("Made INT64");
-          avroSchemaBuilder.name(name).type().longType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().longType().noDefault();
           break;
         case "STRING(MAX)":
+        case "STRING(64)":
+        case "STRING(36)":
           log.debug("Made STRING");
-          avroSchemaBuilder.name(name).type().stringType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().stringType().noDefault();
           break;
         case "TIMESTAMP":
           log.debug("Made TIMESTAMP");
-          avroSchemaBuilder.name(name).type().stringType().noDefault();
+          avroSchemaBuilder.name(name).type().nullable().stringType().noDefault();
           break;
         default:
           log.error("Unknown Schema type when generating Avro Schema: " + type);
@@ -298,7 +300,6 @@ class Poller {
   private void poll() throws Exception {
     log.info("polling ....");
 
-    final ByteBuf bb = Unpooled.directBuffer();
     final String[] ts = new String[1];
     final Statement pollQuery =
         Statement.newBuilder(
@@ -340,39 +341,41 @@ class Poller {
 
       final GenericRecord record = new GenericData.Record(avroSchema);
       keySet.forEach(
-          x -> {
-            switch (spannerSchema.get(x)) {
+          columnName -> {
+            switch (spannerSchema.get(columnName)) {
               case "ARRAY":
                 log.debug("Put ARRAY");
 
-                final Type columnType = resultSet.getColumnType(x);
+                final Type columnType = resultSet.getColumnType(columnName);
                 final String arrayTypeString =
                     columnType.getArrayElementType().getCode().toString();
 
                 switch (arrayTypeString) {
                   case "BOOL":
                     log.debug("Put BOOL");
-                    record.put(x, resultSet.getBooleanList(x));
+                    record.put(columnName, resultSet.getBooleanList(columnName));
                     break;
                   case "BYTES":
                     log.debug("Put BYTES");
-                    record.put(x, resultSet.getBytesList(x));
+                    record.put(columnName, resultSet.getBytesList(columnName));
                     break;
                   case "DATE":
                     log.debug("Put DATE");
-                    record.put(x, resultSet.getStringList(x));
+                    record.put(columnName, resultSet.getStringList(columnName));
                     break;
                   case "FLOAT64":
                     log.debug("Put FLOAT64");
-                    record.put(x, resultSet.getDoubleList(x));
+                    record.put(columnName, resultSet.getDoubleList(columnName));
                     break;
                   case "INT64":
                     log.debug("Put INT64");
-                    record.put(x, resultSet.getLongList(x));
+                    record.put(columnName, resultSet.getLongList(columnName));
                     break;
                   case "STRING(MAX)":
+                  case "STRING(64)":
+                  case "STRING(36)":
                     log.debug("Put STRING");
-                    record.put(x, resultSet.getStringList(x));
+                    record.put(columnName, resultSet.getStringList(columnName));
                     break;
                   case "TIMESTAMP":
                     // Timestamp lists are not supported as of now
@@ -382,47 +385,78 @@ class Poller {
                     log.error("Unknown Data type when generating Array Schema: " + arrayTypeString);
                     break;
                 }
-
                 break;
+
+               // end array fields population to avro record
+
+              // start next field types
+
               case "BOOL":
                 log.debug("Put BOOL");
-                record.put(x, resultSet.getBoolean(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getBoolean(columnName));
                 break;
               case "BYTES":
                 log.debug("Put BYTES");
-                record.put(x, resultSet.getBytes(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getBytes(columnName));
                 break;
               case "DATE":
                 log.debug("Put DATE");
-                record.put(x, resultSet.getString(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getString(columnName));
                 break;
               case "FLOAT64":
                 log.debug("Put FLOAT64");
-                record.put(x, resultSet.getDouble(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getDouble(columnName));
                 break;
               case "INT64":
+              case "INT32":
                 log.debug("Put INT64");
-                record.put(x, resultSet.getLong(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getLong(columnName));
                 break;
               case "STRING(MAX)":
+              case "STRING(64)":
+              case "STRING(36)":
                 log.debug("Put STRING");
-                record.put(x, resultSet.getString(x));
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else record.put(columnName, resultSet.getString(columnName));
                 break;
               case "TIMESTAMP":
                 log.debug("Put TIMESTAMP");
-                ts[0] = resultSet.getTimestamp(x).toString();
-                record.put(x, ts[0]);
+                if (resultSet.getCurrentRowAsStruct().isNull(columnName)) {
+                  record.put(columnName, null);
+                }
+                else {
+                  ts[0] = resultSet.getTimestamp(columnName).toString();
+                  record.put(columnName, ts[0]);
+                }
                 break;
               default:
-                log.error("Unknown Data type when generating Avro Record: " + spannerSchema.get(x));
+                log.error("Unknown Data type when generating Avro Record: " + spannerSchema.get(columnName));
                 break;
             }
           });
 
-      log.debug("Made Record");
-      log.debug(record.toString());
+      log.info("Made Record");
+      log.info(record.toString());
 
       byte[] retVal;
+      String tableRef = tableName.toLowerCase();
       ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
       try {
@@ -439,11 +473,11 @@ class Poller {
 
         if (publishToPubSub) {
           final PubsubMessage pubSubMessage =
-              PubsubMessage.newBuilder().setData(message).putAttributes("Topic", tableName).build();
+              PubsubMessage.newBuilder().setData(message).putAttributes("Topic", tableRef).build();
           final ApiFuture<String> pubSubFuture = publisher.publish(pubSubMessage);
           pubSubFutureList.add(pubSubFuture);
         } else {
-          Queue.send(dbClient, tableName + "_queue", "key", message.toByteArray());
+          Queue.send(dbClient, tableRef + "_queue", "key", message.toByteArray());
         }
 
       } catch (IOException e) {
@@ -494,6 +528,7 @@ class Poller {
   private String getLastProcessedTimestamp() {
 
     String timestamp = "";
+    String tableRef = tableName.toLowerCase();
     try {
       final SubscriberStubSettings subscriberStubSettings =
           SubscriberStubSettings.newBuilder()
@@ -504,7 +539,7 @@ class Poller {
               .build();
 
       try (SubscriberStub subscriber = GrpcSubscriberStub.create(subscriberStubSettings)) {
-        final String subscriptionName = ProjectSubscriptionName.format(projectId, tableName);
+        final String subscriptionName = ProjectSubscriptionName.format(projectId, tableRef);
         final PullRequest pullRequest =
             PullRequest.newBuilder()
                 .setMaxMessages(1)
